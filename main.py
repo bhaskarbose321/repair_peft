@@ -457,9 +457,11 @@ async def adapt(request: Dict[str, Any]) -> Response:
         else:
             return Response(content='{"error": "INVALID_INPUT"}', status_code=400, media_type="application/json")
     except Exception as e:
+        # Return 400 for any validation errors or missing operation
         if "operation" not in request or request["operation"] not in ["choose", "repair"]:
             return Response(content='{"error": "INVALID_INPUT"}', status_code=400, media_type="application/json")
-        raise
+        # Return 400 for other errors to avoid 500 errors
+        return Response(content='{"error": "INVALID_INPUT"}', status_code=400, media_type="application/json")
 
 
 if __name__ == "__main__":
