@@ -457,10 +457,13 @@ async def adapt(request: Dict[str, Any]) -> Response:
         else:
             return Response(content='{"error": "INVALID_INPUT"}', status_code=400, media_type="application/json")
     except Exception as e:
-        # Return 400 for any validation errors or missing operation
-        if "operation" not in request or request["operation"] not in ["choose", "repair"]:
+        # Check if it's a validation error (pydantic ValidationError)
+        if "validation" in str(type(e).__name__).lower() or "missing" in str(e).lower():
             return Response(content='{"error": "INVALID_INPUT"}', status_code=400, media_type="application/json")
-        # Return 400 for other errors to avoid 500 errors
+        # Check if operation is missing or invalid
+        if "operation" not in request or request.get("operation") not in ["choose", "repair"]:
+            return Response(content='{"error": "INVALID_INPUT"}', status_code=400, media_type="application/json")
+        # For other errors, still return 400 to avoid 500 but log could be added
         return Response(content='{"error": "INVALID_INPUT"}', status_code=400, media_type="application/json")
 
 
