@@ -1,13 +1,3 @@
----
-title: Adapt Service
-emoji: ⚡
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-pinned: false
-license: mit
----
-
 # Deterministic HTTP JSON Service
 
 FastAPI service implementing `choose` and `repair` operations for ML intervention selection and repair validation.
@@ -32,3 +22,10 @@ python -m pytest test_main.py -v
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+
+## Deployment
+
+This service is deployed on Render using native Python runtime.
+
+- **Build Command**: `pip install -r requirements.txt`
+- **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
