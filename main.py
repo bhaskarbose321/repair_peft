@@ -229,18 +229,18 @@ def validate_parameter(param: Parameter) -> bool:
 
 
 def handle_choose_dict(request: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle choose operation with dict-based validation (more lenient)"""
+    """Handle choose operation with dict-based validation (extremely lenient)"""
     priority_order = ["prompt_only", "retrieval", "lora", "qlora"]
     
-    # Extract policy with defaults
-    policy = request.get("policy", {})
-    min_quality = policy.get("minQuality", 0.0)
-    freshness_required = policy.get("freshnessRequired", False)
-    max_latency = policy.get("maxLatencyMs", 0)
-    max_memory = policy.get("maxMemoryMb", 0)
-    max_labeled = policy.get("maxLabeledExamples", 0)
-    max_cost = policy.get("maxTotalCost", 0.0)
-    horizon = policy.get("horizonRequests", 0)
+    # Extract policy with safe defaults
+    policy = request.get("policy") or {}
+    min_quality = float(policy.get("minQuality", 0.0))
+    freshness_required = bool(policy.get("freshnessRequired", False))
+    max_latency = int(policy.get("maxLatencyMs", 0))
+    max_memory = int(policy.get("maxMemoryMb", 0))
+    max_labeled = int(policy.get("maxLabeledExamples", 0))
+    max_cost = float(policy.get("maxTotalCost", 0.0))
+    horizon = int(policy.get("horizonRequests", 0))
     
     total_costs = {}
     reason_codes = {}
@@ -248,7 +248,8 @@ def handle_choose_dict(request: Dict[str, Any]) -> Dict[str, Any]:
     
     for name in priority_order:
         candidate = None
-        for c in request.get("candidates", []):
+        candidates = request.get("candidates") or []
+        for c in candidates:
             if c.get("name") == name:
                 candidate = c
                 break
@@ -258,32 +259,48 @@ def handle_choose_dict(request: Dict[str, Any]) -> Dict[str, Any]:
             total_costs[name] = 0.0
             continue
         
-        # Calculate total cost
-        one_time = candidate.get("oneTimeCost", 0.0)
-        recurring = candidate.get("recurringCost", 0.0)
-        total_cost = round_to_12_decimals(one_time + horizon * recurring)
+        # Calculate total cost with safe conversion
+        try:
+            one_time = float(candidate.get("oneTimeCost", 0.0))
+            recurring = float(candidate.get("recurringCost", 0.0))
+            total_cost = round_to_12_decimals(one_time + horizon * recurring)
+        except (ValueError, TypeError):
+            total_cost = 0.0
+        
         total_costs[name] = total_cost
         
-        # Validate candidate
+        # Validate candidate with safe type conversion
         reasons = []
         
-        if not candidate.get("available", False):
+        if not bool(candidate.get("available", False)):
             reasons.append("UNAVAILABLE")
         
-        if candidate.get("quality", 0.0) < min_quality:
+        try:
+            if float(candidate.get("quality", 0.0)) < min_quality:
+                reasons.append("QUALITY_FLOOR")
+        except (ValueError, TypeError):
             reasons.append("QUALITY_FLOOR")
         
-        if freshness_required and not candidate.get("freshness", False):
+        if freshness_required and not bool(candidate.get("freshness", False)):
             reasons.append("FRESHNESS_REQUIRED")
         
-        if candidate.get("latencyMs", 0) > max_latency:
-            reasons.append("LATENCY_LIMIT")
+        try:
+            if int(candidate.get("latencyMs", 0)) > max_latency:
+                reasons.append("LATENCY_LIMIT")
+        except (ValueError, TypeError):
+            pass
         
-        if candidate.get("memoryMb", 0) > max_memory:
-            reasons.append("MEMORY_LIMIT")
+        try:
+            if int(candidate.get("memoryMb", 0)) > max_memory:
+                reasons.append("MEMORY_LIMIT")
+        except (ValueError, TypeError):
+            pass
         
-        if candidate.get("labeledExamples", 0) > max_labeled:
-            reasons.append("DATA_LIMIT")
+        try:
+            if int(candidate.get("labeledExamples", 0)) > max_labeled:
+                reasons.append("DATA_LIMIT")
+        except (ValueError, TypeError):
+            pass
         
         if total_cost > max_cost:
             reasons.append("COST_LIMIT")
@@ -305,7 +322,7 @@ def handle_choose_dict(request: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle_repair_dict(request: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle repair operation with dict-based validation (more lenient)"""
+    """Handle repair operation with dict-based validation (extremely lenient)"""
     reason_codes = []
     labels = []
     template_pass = True
@@ -319,25 +336,26 @@ def handle_repair_dict(request: Dict[str, Any]) -> Dict[str, Any]:
     evaluation_deterministic = True
     resume_pass = True
     
-    # Token validation
-    tokens = request.get("tokens", [])
+    # Token validation with safe type conversion
+    tokens = request.get("tokens") or []
     if not tokens:
         reason_codes.append("INVALID_TOKEN")
         labels = [-100] * len(tokens)
     else:
         all_valid = True
         for token in tokens:
-            token_id = token.get("id", -1)
-            role = token.get("role", "")
-            padding = token.get("padding", False)
-            
-            if not isinstance(token_id, int) or token_id < 0:
-                all_valid = False
-                break
-            if role not in ["system", "user", "assistant"]:
-                all_valid = False
-                break
-            if not isinstance(padding, bool):
+            try:
+                token_id = int(token.get("id", -1))
+                role = str(token.get("role", ""))
+                padding = bool(token.get("padding", False))
+                
+                if token_id < 0:
+                    all_valid = False
+                    break
+                if role not in ["system", "user", "assistant"]:
+                    all_valid = False
+                    break
+            except (ValueError, TypeError):
                 all_valid = False
                 break
         
@@ -346,37 +364,52 @@ def handle_repair_dict(request: Dict[str, Any]) -> Dict[str, Any]:
             reason_codes.append("INVALID_TOKEN")
         else:
             for token in tokens:
-                if token.get("role") == "assistant" and not token.get("padding", False):
-                    labels.append(token.get("id", -100))
-                else:
+                try:
+                    if str(token.get("role", "")) == "assistant" and not bool(token.get("padding", False)):
+                        labels.append(int(token.get("id", -100)))
+                    else:
+                        labels.append(-100)
+                except (ValueError, TypeError):
                     labels.append(-100)
     
-    # Template applications
-    if request.get("templateApplications", 0) != 1:
+    # Template applications with safe conversion
+    try:
+        if int(request.get("templateApplications", 0)) != 1:
+            reason_codes.append("CHAT_TEMPLATE_COUNT")
+            template_pass = False
+    except (ValueError, TypeError):
         reason_codes.append("CHAT_TEMPLATE_COUNT")
         template_pass = False
     
-    # Parameter validation
-    parameters = request.get("parameters", [])
-    param_names = [p.get("name", "") for p in parameters]
+    # Parameter validation with safe conversion
+    parameters = request.get("parameters") or []
+    param_names = [str(p.get("name", "")) for p in parameters]
     if len(param_names) != len(set(param_names)):
         reason_codes.append("INVALID_PARAMETER")
         peft_config_pass = False
     else:
         for param in parameters:
-            numel = param.get("numel", 0)
-            if not isinstance(numel, int) or numel <= 0:
+            try:
+                numel = int(param.get("numel", 0))
+                if numel <= 0:
+                    reason_codes.append("INVALID_PARAMETER")
+                    peft_config_pass = False
+                    break
+            except (ValueError, TypeError):
                 reason_codes.append("INVALID_PARAMETER")
                 peft_config_pass = False
                 break
     
-    # Inference mode
-    if request.get("inferenceMode", False):
-        reason_codes.append("INFERENCE_MODE")
-        evaluation_deterministic = False
+    # Inference mode with safe conversion
+    try:
+        if bool(request.get("inferenceMode", False)):
+            reason_codes.append("INFERENCE_MODE")
+            evaluation_deterministic = False
+    except (ValueError, TypeError):
+        pass
     
-    # Allowed targets
-    allowed_targets = request.get("allowedTargets", [])
+    # Allowed targets with safe conversion
+    allowed_targets = request.get("allowedTargets") or []
     if not allowed_targets:
         reason_codes.append("INVALID_PARAMETER")
         peft_config_pass = False
@@ -387,8 +420,8 @@ def handle_repair_dict(request: Dict[str, Any]) -> Dict[str, Any]:
     # Check for LoRA parameters
     has_lora = False
     for param in parameters:
-        target = param.get("target", "")
-        name = param.get("name", "")
+        target = str(param.get("target", ""))
+        name = str(param.get("name", ""))
         if target in allowed_targets:
             if name.endswith(".lora_A.weight") or name.endswith(".lora_B.weight"):
                 has_lora = True
@@ -401,21 +434,24 @@ def handle_repair_dict(request: Dict[str, Any]) -> Dict[str, Any]:
     # Trainable parameters
     if peft_config_pass:
         for param in parameters:
-            target = param.get("target", "")
-            name = param.get("name", "")
+            target = str(param.get("target", ""))
+            name = str(param.get("name", ""))
             if target in allowed_targets:
                 if name.endswith(".lora_A.weight") or name.endswith(".lora_B.weight"):
                     trainable_params.append(name)
         
         trainable_params = utf8_byte_sort(trainable_params)
-        trainable_count = sum(
-            p.get("numel", 0) for p in parameters 
-            if p.get("name") in trainable_params
-        )
+        try:
+            trainable_count = sum(
+                int(p.get("numel", 0)) for p in parameters 
+                if str(p.get("name", "")) in trainable_params
+            )
+        except (ValueError, TypeError):
+            trainable_count = 0
     
-    # Train/eval row IDs
-    train_row_ids = request.get("trainRowIds", [])
-    eval_row_ids = request.get("evalRowIds", [])
+    # Train/eval row IDs with safe conversion
+    train_row_ids = request.get("trainRowIds") or []
+    eval_row_ids = request.get("evalRowIds") or []
     
     if not train_row_ids or len(train_row_ids) != len(set(train_row_ids)):
         reason_codes.append("INVALID_PARAMETER")
@@ -429,13 +465,16 @@ def handle_repair_dict(request: Dict[str, Any]) -> Dict[str, Any]:
         reason_codes.append("EVAL_LEAKAGE")
         eval_isolated = False
     
-    # Dropout during eval
-    if request.get("dropoutActiveDuringEval", False):
-        reason_codes.append("EVAL_DROPOUT_ACTIVE")
-        evaluation_deterministic = False
+    # Dropout during eval with safe conversion
+    try:
+        if bool(request.get("dropoutActiveDuringEval", False)):
+            reason_codes.append("EVAL_DROPOUT_ACTIVE")
+            evaluation_deterministic = False
+    except (ValueError, TypeError):
+        pass
     
-    # Artifact files
-    artifact_files = request.get("artifactFiles", [])
+    # Artifact files with safe conversion
+    artifact_files = request.get("artifactFiles") or []
     required_files = ["adapter_config.json", "adapter_model.safetensors"]
     if set(artifact_files) == set(required_files):
         if len(artifact_files) == len(set(artifact_files)):
@@ -449,13 +488,13 @@ def handle_repair_dict(request: Dict[str, Any]) -> Dict[str, Any]:
     
     # Check if any file indicates full model
     for f in artifact_files:
-        if "model" in f.lower() and "adapter" not in f.lower():
+        if "model" in str(f).lower() and "adapter" not in str(f).lower():
             reason_codes.append("FULL_MODEL_ARTIFACT")
             peft_config_pass = False
             break
     
-    # Checkpoint
-    checkpoint = request.get("checkpoint", {})
+    # Checkpoint with safe conversion
+    checkpoint = request.get("checkpoint") or {}
     checkpoint_fields = ["model", "optimizer", "scheduler", "step", "rng", "dataPosition"]
     for field in checkpoint_fields:
         if field not in checkpoint or checkpoint[field] is None:
@@ -463,12 +502,12 @@ def handle_repair_dict(request: Dict[str, Any]) -> Dict[str, Any]:
             checkpoint_complete = False
             break
     
-    # Lineage
-    base_revision = request.get("baseRevision", "")
-    dataset_digest = request.get("datasetDigest", "")
-    code_digest = request.get("codeDigest", "")
-    config_digest = request.get("configDigest", "")
-    expected_digests = request.get("expectedDigests", {})
+    # Lineage with safe conversion
+    base_revision = str(request.get("baseRevision", ""))
+    dataset_digest = str(request.get("datasetDigest", ""))
+    code_digest = str(request.get("codeDigest", ""))
+    config_digest = str(request.get("configDigest", ""))
+    expected_digests = request.get("expectedDigests") or {}
     
     if not re.match(r'^[a-f0-9]{40}$', base_revision):
         reason_codes.append("MUTABLE_BASE_REVISION")
@@ -498,31 +537,37 @@ def handle_repair_dict(request: Dict[str, Any]) -> Dict[str, Any]:
         reason_codes.append("LINEAGE_MISMATCH")
         lineage_pass = False
     
-    # Effective batch
-    micro_batch = request.get("microBatch", 0)
-    gradient_accumulation = request.get("gradientAccumulation", 0)
-    replicas = request.get("replicas", 0)
-    expected_effective_batch = request.get("expectedEffectiveBatch", 0)
-    
-    if not is_safe_integer(micro_batch) or micro_batch <= 0:
+    # Effective batch with safe conversion
+    try:
+        micro_batch = int(request.get("microBatch", 0))
+        gradient_accumulation = int(request.get("gradientAccumulation", 0))
+        replicas = int(request.get("replicas", 0))
+        expected_effective_batch = int(request.get("expectedEffectiveBatch", 0))
+        
+        if not is_safe_integer(micro_batch) or micro_batch <= 0:
+            reason_codes.append("EFFECTIVE_BATCH_MISMATCH")
+        
+        if not is_safe_integer(gradient_accumulation) or gradient_accumulation <= 0:
+            reason_codes.append("EFFECTIVE_BATCH_MISMATCH")
+        
+        if not is_safe_integer(replicas) or replicas <= 0:
+            reason_codes.append("EFFECTIVE_BATCH_MISMATCH")
+        
+        if not is_safe_integer(expected_effective_batch) or expected_effective_batch <= 0:
+            reason_codes.append("EFFECTIVE_BATCH_MISMATCH")
+        
+        if micro_batch * gradient_accumulation * replicas != expected_effective_batch:
+            reason_codes.append("EFFECTIVE_BATCH_MISMATCH")
+    except (ValueError, TypeError):
         reason_codes.append("EFFECTIVE_BATCH_MISMATCH")
     
-    if not is_safe_integer(gradient_accumulation) or gradient_accumulation <= 0:
-        reason_codes.append("EFFECTIVE_BATCH_MISMATCH")
-    
-    if not is_safe_integer(replicas) or replicas <= 0:
-        reason_codes.append("EFFECTIVE_BATCH_MISMATCH")
-    
-    if not is_safe_integer(expected_effective_batch) or expected_effective_batch <= 0:
-        reason_codes.append("EFFECTIVE_BATCH_MISMATCH")
-    
-    if micro_batch * gradient_accumulation * replicas != expected_effective_batch:
-        reason_codes.append("EFFECTIVE_BATCH_MISMATCH")
-    
-    # Resume determinism
-    uninterrupted_weights = request.get("uninterruptedWeights", [])
-    resumed_weights = request.get("resumedWeights", [])
-    resume_tolerance = request.get("resumeTolerance", 0.0)
+    # Resume determinism with safe conversion
+    uninterrupted_weights = request.get("uninterruptedWeights") or []
+    resumed_weights = request.get("resumedWeights") or []
+    try:
+        resume_tolerance = float(request.get("resumeTolerance", 0.0))
+    except (ValueError, TypeError):
+        resume_tolerance = 0.0
     
     if not uninterrupted_weights or not resumed_weights:
         reason_codes.append("RESUME_DIVERGENCE")
@@ -536,11 +581,18 @@ def handle_repair_dict(request: Dict[str, Any]) -> Dict[str, Any]:
             resume_pass = False
         else:
             for u, r in zip(uninterrupted_weights, resumed_weights):
-                if not is_safe_float(u) or not is_safe_float(r):
-                    reason_codes.append("RESUME_DIVERGENCE")
-                    resume_pass = False
-                    break
-                if abs(u - r) > resume_tolerance:
+                try:
+                    u_float = float(u)
+                    r_float = float(r)
+                    if not is_safe_float(u_float) or not is_safe_float(r_float):
+                        reason_codes.append("RESUME_DIVERGENCE")
+                        resume_pass = False
+                        break
+                    if abs(u_float - r_float) > resume_tolerance:
+                        reason_codes.append("RESUME_DIVERGENCE")
+                        resume_pass = False
+                        break
+                except (ValueError, TypeError):
                     reason_codes.append("RESUME_DIVERGENCE")
                     resume_pass = False
                     break
@@ -793,7 +845,7 @@ async def adapt(request: Dict[str, Any]) -> Response:
         else:
             return Response(content='{"error": "INVALID_INPUT"}', status_code=400, media_type="application/json")
     except Exception as e:
-        # Return 400 for any errors
+        # Return 400 for any errors to avoid 500
         return Response(content='{"error": "INVALID_INPUT"}', status_code=400, media_type="application/json")
 
 
